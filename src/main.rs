@@ -35,9 +35,11 @@ fn main() {
                 ..
             } => *control_flow = ControlFlow::Exit,
 
-            WindowEvent::Resized(physical_size) => (),
+            WindowEvent::Resized(physical_size) => viewport.resize(*physical_size),
 
-            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => (),
+            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                viewport.resize(**new_inner_size)
+            }
 
             _ => (),
         },
@@ -113,6 +115,15 @@ impl Viewport {
         }
     }
 
+    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.size = new_size;
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            self.surface.configure(&self.device, &self.config);
+        }
+    }
+
     fn update(&mut self, _dt: Duration) {}
 
     fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -141,7 +152,7 @@ impl Viewport {
         let pipeline = self
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
+                label: Some("Viewport::render() pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -153,11 +164,8 @@ impl Viewport {
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: Some(wgpu::Face::Back),
-                    // Requires `Features::DEPTH_CLIP_CONTROL`.
                     unclipped_depth: false,
-                    // Anything but Fill requires `Features::NON_FILL_POLYGON_MODE`.
                     polygon_mode: wgpu::PolygonMode::Fill,
-                    // Requires `Features::CONSERVATIVE_RASTERIZATION`.
                     conservative: false,
                 },
                 depth_stencil: None,
@@ -171,7 +179,7 @@ impl Viewport {
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
                         format: self.config.format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
