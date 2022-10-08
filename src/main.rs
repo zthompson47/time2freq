@@ -1,6 +1,7 @@
-#![allow(unused)]
-use pollster::block_on;
 use std::time::{Duration, Instant};
+
+use pollster::block_on;
+use wgpu::util::DeviceExt;
 use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -16,7 +17,7 @@ fn main() {
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::DeviceEvent {
-            event: DeviceEvent::MouseMotion { delta },
+            event: DeviceEvent::MouseMotion { delta: _delta },
             ..
         } => (),
 
@@ -50,7 +51,7 @@ fn main() {
             last_render_time = now;
 
             viewport.update(dt);
-            viewport.render();
+            viewport.render().unwrap();
         }
 
         Event::MainEventsCleared => window.request_redraw(),
@@ -61,11 +62,13 @@ fn main() {
 
 struct Viewport {
     size: PhysicalSize<u32>,
+    #[allow(unused)]
     scale_factor: f32,
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    uniform: Uniform,
 }
 
 impl Viewport {
@@ -73,7 +76,8 @@ impl Viewport {
         let size = window.inner_size();
         let scale_factor = window.scale_factor() as f32;
         let instance = wgpu::Instance::new(wgpu::Backends::all());
-        // SAFETY: `View` is created in the main thread and `window` remains valid
+
+        // SAFETY: `Viewport` is created in the main thread and `window` remains valid
         // for the lifetime of `surface`.
         let surface = unsafe { instance.create_surface(window) };
 
@@ -105,6 +109,8 @@ impl Viewport {
         };
         surface.configure(&device, &config);
 
+        let uniform = Uniform::new(&device);
+
         Self {
             size,
             scale_factor,
@@ -112,6 +118,7 @@ impl Viewport {
             device,
             queue,
             config,
+            uniform,
         }
     }
 
@@ -124,13 +131,17 @@ impl Viewport {
         }
     }
 
-    fn update(&mut self, _dt: Duration) {}
+    fn update(&mut self, dt: Duration) {
+        let dt = dt.as_secs_f32() / 10.0;
+        self.uniform.update_with_delta(&self.queue, [2.0 * dt, dt]);
+    }
 
     fn render(&self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -141,7 +152,7 @@ impl Viewport {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&self.uniform.bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -200,6 +211,7 @@ impl Viewport {
                 depth_stencil_attachment: None,
             });
 
+            render_pass.set_bind_group(0, &self.uniform.bind_group, &[]);
             render_pass.set_pipeline(&pipeline);
             render_pass.draw(0..3, 0..1);
         }
@@ -208,5 +220,63 @@ impl Viewport {
         output.present();
 
         Ok(())
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct UniformRaw {
+    level: [f32; 2],
+}
+
+struct Uniform {
+    raw: UniformRaw,
+    buffer: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
+}
+
+impl Uniform {
+    fn new(device: &wgpu::Device) -> Self {
+        let raw = UniformRaw { level: [0.0; 2] };
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&[raw]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+
+        Self {
+            raw,
+            buffer,
+            bind_group_layout,
+            bind_group,
+        }
+    }
+
+    fn update_with_delta(&mut self, queue: &wgpu::Queue, delta: [f32; 2]) {
+        let level = self.raw.level;
+        self.raw.level = [(level[0] + delta[0]) % 1.0, (level[1] + delta[1]) % 1.0];
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.raw]));
     }
 }
