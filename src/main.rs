@@ -9,6 +9,8 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use noise::{Ease, PNoise1};
+
 fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
@@ -69,6 +71,7 @@ struct Viewport {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     uniform: Uniform,
+    noise: (PNoise1, PNoise1),
 }
 
 impl Viewport {
@@ -110,6 +113,10 @@ impl Viewport {
         surface.configure(&device, &config);
 
         let uniform = Uniform::new(&device);
+        let noise = (
+            PNoise1::new(47, 64, 1024, Ease::SmoothStep),
+            PNoise1::new(42, 64, 1024, Ease::SmoothStep),
+        );
 
         Self {
             size,
@@ -119,21 +126,8 @@ impl Viewport {
             queue,
             config,
             uniform,
+            noise,
         }
-    }
-
-    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.size = new_size;
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
-            self.surface.configure(&self.device, &self.config);
-        }
-    }
-
-    fn update(&mut self, dt: Duration) {
-        let dt = dt.as_secs_f32() / 10.0;
-        self.uniform.update_with_delta(&self.queue, [2.0 * dt, dt]);
     }
 
     fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -171,7 +165,7 @@ impl Viewport {
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: Some(wgpu::Face::Back),
@@ -213,13 +207,32 @@ impl Viewport {
 
             render_pass.set_bind_group(0, &self.uniform.bind_group, &[]);
             render_pass.set_pipeline(&pipeline);
-            render_pass.draw(0..3, 0..1);
+            render_pass.draw(0..4, 0..1);
+            render_pass.draw(4..8, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
         output.present();
 
         Ok(())
+    }
+
+    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.size = new_size;
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            self.surface.configure(&self.device, &self.config);
+        }
+    }
+
+    fn update(&mut self, dt: Duration) {
+        let dt = dt.as_secs_f32();
+        let d_left = dt * self.noise.0.next().unwrap();
+        let d_right = dt * self.noise.1.next().unwrap();
+
+        self.uniform
+            .update_with_delta(&self.queue, [d_left, d_right]);
     }
 }
 
