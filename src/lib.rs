@@ -1,4 +1,5 @@
 pub mod audio;
+mod resources;
 mod uniform;
 mod viewport;
 

@@ -1,14 +1,9 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use winit::{
-    dpi::PhysicalSize,
-    //event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    //event_loop::{ControlFlow, EventLoop},
-    window::Window,
-};
+use winit::{dpi::PhysicalSize, window::Window};
 
-use noise::{Ease, PNoise1};
 use crate::Uniform;
+use noise::{Ease, PNoise1};
 
 pub struct Viewport {
     size: PhysicalSize<u32>,
@@ -18,8 +13,9 @@ pub struct Viewport {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    uniform: Uniform,
+    pub uniform: Uniform,
     noise: (PNoise1, PNoise1),
+    start_time: Instant,
 }
 
 impl Viewport {
@@ -62,8 +58,8 @@ impl Viewport {
 
         let uniform = Uniform::new(&device);
         let noise = (
-            PNoise1::new(47, 64, 1024, Ease::SmoothStep),
-            PNoise1::new(42, 64, 1024, Ease::SmoothStep),
+            PNoise1::new(47, 16, 1024, Ease::SmoothStep),
+            PNoise1::new(42, 16, 1024, Ease::SmoothStep),
         );
 
         Self {
@@ -75,6 +71,7 @@ impl Viewport {
             config,
             uniform,
             noise,
+            start_time: Instant::now(),
         }
     }
 
@@ -174,12 +171,14 @@ impl Viewport {
         }
     }
 
-    pub fn update(&mut self, dt: Duration) {
-        let dt = dt.as_secs_f32();
-        let d_left = dt * self.noise.0.next().unwrap();
-        let d_right = dt * self.noise.1.next().unwrap();
+    pub fn update(&mut self, _dt: Duration) {
+        let level_left = self.noise.0.next().unwrap();
+        let level_right = self.noise.1.next().unwrap();
 
-        self.uniform
-            .update_with_delta(&self.queue, [d_left, d_right]);
+        self.uniform.raw.level = [level_left, level_right];
+        self.uniform.raw.screen_size = [self.config.width as f32, self.config.height as f32];
+        self.uniform.raw.time = (Instant::now() - self.start_time).as_secs_f32();
+
+        self.uniform.write_buffer(&self.queue);
     }
 }

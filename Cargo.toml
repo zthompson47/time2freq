@@ -12,6 +12,7 @@ log = "0.4.17"
 noise = { path = "/home/zach/projects/wgpu/noise" }
 pollster = "0.2.5"
 rtrb = "0.2.2"
+rubato = "0.12.0"
 symphonia = "0.5.1"
 wgpu = "0.13.1"
 winit = "0.27.3"

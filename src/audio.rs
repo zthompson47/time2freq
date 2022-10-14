@@ -1,20 +1,9 @@
-use std::{collections::HashMap, fs::File, path::Path};
-
 use anyhow::{Error, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam::channel;
-use symphonia::{
-    core::{
-        audio::SampleBuffer,
-        codecs::{Decoder, DecoderOptions},
-        errors::Error::DecodeError,
-        formats::{FormatOptions, FormatReader},
-        io::MediaSourceStream,
-        meta::MetadataOptions,
-        probe::Hint,
-    },
-    default::{get_codecs, get_probe},
-};
+use rubato::Resampler;
+
+use crate::resources::{AudioFile, CopyMethod};
 
 pub struct AudioPlayer {
     #[allow(unused)]
@@ -23,6 +12,8 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
+    const CHUNK_SIZE: usize = 1024;
+
     pub fn new(latency_ms: u32, sample_rate: u32, channels: u32) -> Result<Self> {
         let latency_frames = (latency_ms as f32 * sample_rate as f32 / 1000.0).round() as u32;
         let latency_samples = (latency_frames * channels) as usize;
@@ -34,17 +25,76 @@ impl AudioPlayer {
         // Spawn thread to play songs.
         let (tx_play_song, rx_play_song) = channel::unbounded::<String>();
         std::thread::spawn(move || {
+            let interpolation_params = rubato::InterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: rubato::InterpolationType::Linear,
+                oversampling_factor: 256,
+                window: rubato::WindowFunction::BlackmanHarris2,
+            };
+
+            let mut resampler = rubato::SincFixedIn::<f32>::new(
+                48000.0 / 44100.0,
+                2.0,
+                interpolation_params,
+                Self::CHUNK_SIZE,
+                2,
+            )
+            .unwrap();
+
+            let mut buf_resampler_in = resampler.input_buffer_allocate();
+            let mut buf_resampler_out = resampler.output_buffer_allocate();
+
             while let Ok(song) = rx_play_song.recv() {
                 let mut audio = AudioFile::open(song).unwrap();
+                let mut audio_buf = Vec::<f32>::with_capacity(4 * Self::CHUNK_SIZE);
+                let mut resampler_final = Vec::new();
 
                 while let Ok(Some(buf)) = audio.next_sample(CopyMethod::Interleaved) {
-                    for i in 0..buf.len() {
+                    let output = {
+                        if audio.sample_rate() == 44100 {
+                            audio_buf.extend(buf.samples());
+
+                            if audio_buf.len() >= 2 * Self::CHUNK_SIZE {
+                                buf_resampler_in[0].clear();
+                                buf_resampler_in[1].clear();
+                                buf_resampler_out[0].clear();
+                                buf_resampler_out[1].clear();
+
+                                let len = 2 * Self::CHUNK_SIZE;
+                                let mut chunk = audio_buf.drain(0..len);
+                                for _ in 0..len / 2 {
+                                    buf_resampler_in[0].push(chunk.next().unwrap());
+                                    buf_resampler_in[1].push(chunk.next().unwrap());
+                                }
+
+                                resampler
+                                    .process_into_buffer(
+                                        &buf_resampler_in,
+                                        &mut buf_resampler_out,
+                                        None,
+                                    )
+                                    .unwrap();
+                            } else {
+                                continue;
+                            }
+
+                            resampler_final.clear();
+
+                            for i in 0..buf_resampler_out[0].len() {
+                                resampler_final.push(buf_resampler_out[0][i]);
+                                resampler_final.push(buf_resampler_out[1][i]);
+                            }
+
+                            resampler_final.as_ref()
+                        } else {
+                            buf.samples()
+                        }
+                    };
+
+                    for sample in output {
                         loop {
-                            if ring_prod.push(buf.samples()[i]).is_ok() {
-                                // Fill buffer for signal analysis.
-                                //if rb_prod_lvl.push(buf.samples()[i]).is_err() {
-                                //panic!()
-                                //}
+                            if ring_prod.push(*sample).is_ok() {
                                 break;
                             }
                             std::thread::sleep(std::time::Duration::from_millis(latency_ms as u64));
@@ -91,7 +141,7 @@ impl AudioPlayer {
                 }
 
                 if input_fell_behind {
-                    //eprintln!("input fell behind");
+                    eprintln!("input fell behind");
                 }
             },
             move |err| {
@@ -110,92 +160,4 @@ impl AudioPlayer {
     pub fn play(&self, song: &str) {
         self.tx_play_song.send(song.into()).unwrap();
     }
-}
-
-pub struct AudioFile {
-    format: Box<dyn FormatReader>,
-    decoder: Box<dyn Decoder>,
-    default_track_id: u32,
-}
-
-impl AudioFile {
-    pub fn info(&self) -> HashMap<String, String> {
-        [
-            ("sample_rate".to_string(), self.sample_rate().to_string()),
-            ("channels".to_string(), self.channels().to_string()),
-        ]
-        .into()
-    }
-
-    pub fn sample_rate(&self) -> u32 {
-        self.decoder.codec_params().sample_rate.unwrap()
-    }
-
-    pub fn channels(&self) -> usize {
-        self.decoder.codec_params().channels.unwrap().count()
-    }
-
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let src = Box::new(File::open(path)?);
-        let mss = MediaSourceStream::new(src, Default::default());
-        let hint = Hint::new();
-        let format_opts: FormatOptions = Default::default();
-        let metadata_opts: MetadataOptions = Default::default();
-        let decoder_opts: DecoderOptions = Default::default();
-        let format = get_probe()
-            .format(&hint, mss, &format_opts, &metadata_opts)
-            .unwrap()
-            .format;
-        let track = format
-            .default_track()
-            .ok_or_else(|| Error::msg("No default track."))?;
-        let decoder = get_codecs().make(&track.codec_params, &decoder_opts)?;
-        let default_track_id = track.id;
-
-        Ok(AudioFile {
-            format,
-            decoder,
-            default_track_id,
-        })
-    }
-
-    pub fn next_sample(&mut self, meth: CopyMethod) -> Result<Option<SampleBuffer<f32>>> {
-        let packet = self.format.next_packet()?;
-        if packet.track_id() != self.default_track_id {
-            return Ok(None);
-        }
-        match self.decoder.decode(&packet) {
-            Ok(audio_buf_ref) => {
-                let spec = *audio_buf_ref.spec();
-                let duration = audio_buf_ref.capacity() as u64;
-                let mut buf = SampleBuffer::new(duration, spec);
-                if let CopyMethod::Interleaved = meth {
-                    buf.copy_interleaved_ref(audio_buf_ref);
-                } else if let CopyMethod::Planar = meth {
-                    buf.copy_planar_ref(audio_buf_ref);
-                }
-                Ok(Some(buf))
-            }
-            Err(DecodeError(_)) => Ok(None),
-            Err(_) => Err(Error::msg("Decode error.")),
-        }
-    }
-
-    pub fn dump(&mut self) -> (Vec<f32>, Vec<f32>) {
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        while let Ok(buf) = self.next_sample(CopyMethod::Planar) {
-            if let Some(buf) = buf {
-                let s = buf.samples();
-                left.append(&mut Vec::from(&s[..s.len() / 2]));
-                right.append(&mut Vec::from(&s[s.len() / 2..]));
-            }
-        }
-        (left, right)
-    }
-}
-
-pub enum CopyMethod {
-    Interleaved,
-    Planar,
 }

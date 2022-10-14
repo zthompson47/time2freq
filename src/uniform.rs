@@ -1,13 +1,18 @@
+use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct UniformRaw {
-    level: [f32; 2],
+pub struct UniformRaw {
+    pub level: [f32; 2],
+    pub mouse_pos: [f32; 2],
+    pub screen_size: [f32; 2],
+    pub time: f32,
+    _pad: f32,
 }
 
 pub struct Uniform {
-    raw: UniformRaw,
+    pub raw: UniformRaw,
     buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
@@ -15,17 +20,19 @@ pub struct Uniform {
 
 impl Uniform {
     pub fn new(device: &wgpu::Device) -> Self {
-        let raw = UniformRaw { level: [0.0; 2] };
+        let raw = UniformRaw::zeroed();
+
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: bytemuck::cast_slice(&[raw]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -34,6 +41,7 @@ impl Uniform {
                 count: None,
             }],
         });
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
@@ -51,17 +59,15 @@ impl Uniform {
         }
     }
 
-    pub fn update_with_delta(&mut self, queue: &wgpu::Queue, delta: [f32; 2]) {
-        let level = self.raw.level;
-        self.raw.level = [(level[0] + delta[0]) % 1.0, (level[1] + delta[1]) % 1.0];
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.raw]));
-    }
-
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
 
     pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
+    }
+
+    pub fn write_buffer(&mut self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.raw]));
     }
 }

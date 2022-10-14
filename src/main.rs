@@ -16,10 +16,8 @@ fn main() {
     let mut viewport = block_on(Viewport::new(&window));
 
     //let audio = AudioPlayer::new(150, 44100, 2).unwrap();
-    //audio.play(&std::env::args().nth(1).expect("Expected song file"));
-
-    let audio2 = AudioPlayer::new(150, 48000, 2).unwrap();
-    audio2.play(&std::env::args().nth(1).expect("Expected song file"));
+    let audio = AudioPlayer::new(150, 48000, 2).unwrap();
+    audio.play(&std::env::args().nth(1).expect("Expected song file"));
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::DeviceEvent {
@@ -47,6 +45,12 @@ fn main() {
             WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                 viewport.resize(**new_inner_size)
             }
+
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+                ..
+            } => viewport.uniform.raw.mouse_pos = [position.x as f32, position.y as f32],
 
             _ => (),
         },
