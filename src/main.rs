@@ -10,13 +10,14 @@ use winit::{
 use time2freq::{audio::AudioPlayer, Viewport};
 
 fn main() {
+    let _log = tailog::init();
+
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let mut last_render_time = Instant::now();
     let mut viewport = block_on(Viewport::new(&window));
 
-    //let audio = AudioPlayer::new(150, 44100, 2).unwrap();
-    let audio = AudioPlayer::new(150, 48000, 2).unwrap();
+    let mut audio = AudioPlayer::new(20, 48000, 2).unwrap();
     audio.play(&std::env::args().nth(1).expect("Expected song file"));
 
     event_loop.run(move |event, _, control_flow| match event {
@@ -60,7 +61,10 @@ fn main() {
             let dt = now - last_render_time;
             last_render_time = now;
 
-            viewport.update(dt);
+            let rms = audio.rms();
+            log::info!("got RMS in redraw() {rms:?}");
+
+            viewport.update(dt, rms);
             viewport.render().unwrap();
         }
 

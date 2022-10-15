@@ -1,3 +1,5 @@
+use std::{thread, time::Duration};
+
 use anyhow::{Error, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam::channel;
@@ -9,6 +11,8 @@ pub struct AudioPlayer {
     #[allow(unused)]
     stream: cpal::Stream,
     tx_play_song: channel::Sender<String>,
+    lvl_cons: rtrb::Consumer<f32>,
+    rms: [f32; 2],
 }
 
 impl AudioPlayer {
@@ -17,12 +21,17 @@ impl AudioPlayer {
     pub fn new(latency_ms: u32, sample_rate: u32, channels: u32) -> Result<Self> {
         let latency_frames = (latency_ms as f32 * sample_rate as f32 / 1000.0).round() as u32;
         let latency_samples = (latency_frames * channels) as usize;
+
+        // Use ringbuffers to provide data to the audio device and analysis routines.
         let (mut ring_prod, mut ring_cons) = rtrb::RingBuffer::<f32>::new(latency_samples * 2);
+        let (mut lvl_prod, lvl_cons) = rtrb::RingBuffer::<f32>::new(latency_samples * 2);
+
         for _ in 0..latency_samples {
             ring_prod.push(0.0)?;
+            lvl_prod.push(0.0)?;
         }
 
-        // Spawn thread to play songs.
+        // Spawn a thread to process audio files.
         let (tx_play_song, rx_play_song) = channel::unbounded::<String>();
         std::thread::spawn(move || {
             let interpolation_params = rubato::InterpolationParameters {
@@ -92,12 +101,18 @@ impl AudioPlayer {
                         }
                     };
 
+                    log::info!("---------- got audio OUTPUT {}", output.len());
+
                     for sample in output {
                         loop {
                             if ring_prod.push(*sample).is_ok() {
+                                if lvl_prod.push(*sample).is_err() {
+                                    log::warn!("couldn't write to lvl ringbuffer");
+                                }
                                 break;
                             }
-                            std::thread::sleep(std::time::Duration::from_millis(latency_ms as u64));
+                            log::info!("sleeping for {latency_ms}..............................");
+                            thread::sleep(Duration::from_millis(latency_ms as u64));
                         }
                     }
                 }
@@ -141,11 +156,11 @@ impl AudioPlayer {
                 }
 
                 if input_fell_behind {
-                    eprintln!("input fell behind");
+                    log::info!("input fell behind");
                 }
             },
             move |err| {
-                eprintln!("{err:?}");
+                log::info!("{err:?}");
             },
         )?;
 
@@ -154,7 +169,33 @@ impl AudioPlayer {
         Ok(Self {
             stream,
             tx_play_song,
+            lvl_cons,
+            rms: [0., 0.],
         })
+    }
+
+    pub fn rms(&mut self) -> [f32; 2] {
+        let (mut l, mut r) = (vec![], vec![]);
+
+        while let Ok(chunk) = self.lvl_cons.read_chunk(2) {
+            let mut chunk = chunk.into_iter();
+            l.push(chunk.next().unwrap().powi(2));
+            r.push(chunk.next().unwrap().powi(2));
+            if l.len() >= 1024 {
+                break;
+            }
+        }
+
+        log::info!("rms() lvl.len() {} {}", l.len(), r.len());
+
+        if !l.is_empty() && !r.is_empty() {
+            let lvl_l = l.iter().sum::<f32>() / l.len() as f32;
+            let lvl_r = r.iter().sum::<f32>() / r.len() as f32;
+
+            self.rms = [lvl_l.sqrt(), lvl_r.sqrt()];
+        }
+
+        self.rms
     }
 
     pub fn play(&self, song: &str) {

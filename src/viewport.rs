@@ -14,6 +14,7 @@ pub struct Viewport {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pub uniform: Uniform,
+    #[allow(unused)]
     noise: (PNoise1, PNoise1),
     start_time: Instant,
 }
@@ -171,11 +172,11 @@ impl Viewport {
         }
     }
 
-    pub fn update(&mut self, _dt: Duration) {
-        let level_left = self.noise.0.next().unwrap();
-        let level_right = self.noise.1.next().unwrap();
-
-        self.uniform.raw.level = [level_left, level_right];
+    pub fn update(&mut self, _dt: Duration, level: [f32; 2]) {
+        //let level_left = self.noise.0.next().unwrap();
+        //let level_right = self.noise.1.next().unwrap();
+        //self.uniform.raw.level = [level_left, level_right];
+        self.uniform.raw.level = level;
         self.uniform.raw.screen_size = [self.config.width as f32, self.config.height as f32];
         self.uniform.raw.time = (Instant::now() - self.start_time).as_secs_f32();
 
