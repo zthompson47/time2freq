@@ -61,7 +61,10 @@ fn main() {
             let dt = now - last_render_time;
             last_render_time = now;
 
-            let rms = audio.rms();
+            // Try to scale and normalize the levels for max visual effect.
+            let mut rms = audio.rms();
+            rms[0] = (1. - 20. * rms[0].log10() / -20.).clamp(0., 1.);
+            rms[1] = (1. - 20. * rms[1].log10() / -20.).clamp(0., 1.);
             log::info!("got RMS in redraw() {rms:?}");
 
             viewport.update(dt, rms);

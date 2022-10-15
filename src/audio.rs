@@ -28,7 +28,7 @@ impl AudioPlayer {
 
         for _ in 0..latency_samples {
             ring_prod.push(0.0)?;
-            lvl_prod.push(0.0)?;
+            //lvl_prod.push(0.0)?;
         }
 
         // Spawn a thread to process audio files.
