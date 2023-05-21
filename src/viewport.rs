@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::Uniform;
+use crate::{gui::Gui, Uniform, wgpu};
 use noise::{Ease, PNoise1};
 
 pub struct Viewport {
@@ -10,9 +10,10 @@ pub struct Viewport {
     #[allow(unused)]
     scale_factor: f32,
     surface: wgpu::Surface,
-    device: wgpu::Device,
+    pub device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    pub config: wgpu::SurfaceConfiguration,
+    shader: wgpu::ShaderModule,
     pub uniform: Uniform,
     #[allow(unused)]
     noise: (PNoise1, PNoise1),
@@ -23,11 +24,18 @@ impl Viewport {
     pub async fn new(window: &Window) -> Self {
         let size = window.inner_size();
         let scale_factor = window.scale_factor() as f32;
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
+        //let instance = wgpu::Instance::new(wgpu::Backends::all());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..wgpu::InstanceDescriptor::default()
+        });
+
+        //let instance = wgpu::Instance::new(wgpu::Backends::GL);
+        //let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
 
         // SAFETY: `Viewport` is created in the main thread and `window` remains valid
         // for the lifetime of `surface`.
-        let surface = unsafe { instance.create_surface(window) };
+        let surface = unsafe { instance.create_surface(window).unwrap() };
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -45,17 +53,26 @@ impl Viewport {
                     limits: wgpu::Limits::default(),
                 },
                 None,
+                //Some(std::path::Path::new("/home/zach/projects/wgpu/time2freq/trace")),
             )
             .await
             .unwrap();
+
+        let capabilities = surface.get_capabilities(&adapter);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_supported_formats(&adapter)[0],
+            format: capabilities.formats[0],
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: capabilities.alpha_modes[0],
+            view_formats: vec![capabilities.formats[0]],
         };
+
+
         surface.configure(&device, &config);
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let uniform = Uniform::new(&device);
         let noise = (
@@ -70,13 +87,18 @@ impl Viewport {
             device,
             queue,
             config,
+            shader,
             uniform,
             noise,
             start_time: Instant::now(),
         }
     }
 
-    pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(
+        &self,
+        gui: &mut Gui,
+        window: &winit::window::Window,
+    ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -96,17 +118,13 @@ impl Viewport {
                 push_constant_ranges: &[],
             });
 
-        let shader = self
-            .device
-            .create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
-
         let pipeline = self
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Viewport::render() pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &self.shader,
                     entry_point: "vs_main",
                     buffers: &[],
                 },
@@ -126,7 +144,7 @@ impl Viewport {
                     alpha_to_coverage_enabled: false,
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &self.shader,
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
                         format: self.config.format,
@@ -155,7 +173,17 @@ impl Viewport {
             render_pass.set_pipeline(&pipeline);
             render_pass.draw(0..4, 0..1);
             render_pass.draw(4..8, 0..1);
+            //render_pass.draw(0..8, 0..1);
         }
+
+        gui.render(
+            window,
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &self.config,
+            &view,
+        );
 
         self.queue.submit(Some(encoder.finish()));
         output.present();
@@ -172,11 +200,12 @@ impl Viewport {
         }
     }
 
-    pub fn update(&mut self, _dt: Duration, level: [f32; 2]) {
+    pub fn update(&mut self, _dt: Duration, level: ([f32; 2], f32)) {
         //let level_left = self.noise.0.next().unwrap();
         //let level_right = self.noise.1.next().unwrap();
         //self.uniform.raw.level = [level_left, level_right];
-        self.uniform.raw.level = level;
+        self.uniform.raw.level = level.0;
+        self.uniform.raw.loudness = level.1;
         self.uniform.raw.screen_size = [self.config.width as f32, self.config.height as f32];
         self.uniform.raw.time = (Instant::now() - self.start_time).as_secs_f32();
 

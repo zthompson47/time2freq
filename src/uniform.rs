@@ -1,5 +1,7 @@
 use bytemuck::Zeroable;
-use wgpu::util::DeviceExt;
+use crate::wgpu::util::DeviceExt;
+
+use crate::wgpu;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -8,7 +10,9 @@ pub struct UniformRaw {
     pub mouse_pos: [f32; 2],
     pub screen_size: [f32; 2],
     pub time: f32,
-    _pad: f32,
+    pub loudness: f32,
+    _pad: f64,
+    //_pad: f32,
 }
 
 pub struct Uniform {
