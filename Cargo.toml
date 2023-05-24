@@ -4,17 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.65"
-bytemuck = { version = "1.12.1", features = ["derive"] }
-clap = { version = "4.0.18", features = ["derive"] }
+anyhow = "1.0.71"
+bytemuck = { version = "1.13.1", features = ["derive"] }
+clap = { version = "4.3.0", features = ["derive"] }
 #cpal = "0.14.0"
-cpal = { path = "/home/zach/cratesio/cpal" }
+#cpal = { path = "/home/zach/cratesio/cpal" }
+cpal = { version = "0.15.2", features = ["wasm-bindgen"] }
 crossbeam = "0.8.2"
 ebur128 = "0.1.7"
 
-egui = "0.21.0"
-egui-wgpu = "0.21.0"
-egui-winit = "0.21.1"
+#egui = "0.21.0"
+#egui-wgpu = "0.21.0"
+#egui-winit = "0.21.1"
 
 #egui = "0.19.0"
 #egui-wgpu = "0.19.0"
@@ -26,16 +27,20 @@ egui-winit = "0.21.1"
 #egui = { path = "/home/zach/cratesio/egui/crates/egui" }
 #egui-wgpu = { path = "/home/zach/cratesio/egui/crates/egui-wgpu" }
 log = "0.4.17"
-noise = { path = "/home/zach/projects/wgpu/noise" }
-pollster = "0.2.5"
+noize = { path = "../noize" }
+pollster = "0.3.0"
 rtrb = "0.2.2"
 rubato = "0.12.0"
-symphonia = { version = "0.5.1", features = ["aac", "isomp4"] }
+symphonia = { version = "0.5.2", features = ["aac", "isomp4"] }
 #tailog = { git = "https://github.com/zthompson47/tailog" }
-tailog = { path = "/home/zach/projects/tailog" }
+tailog = { path = "../tailog" }
 #wgpu = "0.16.0"
 winit = "0.28.3"
 #winit = "0.27.3"
+
+egui = { path = "/home/zach/cratesio/egui/crates/egui" }
+egui-wgpu = { path = "/home/zach/cratesio/egui/crates/egui-wgpu" }
+egui-winit = { path = "/home/zach/cratesio/egui/crates/egui-winit" }
 
 ###[dependencies.wgpu]
 ####git = "https://github.com/gfx-rs/wgpu"

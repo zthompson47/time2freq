@@ -8,7 +8,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
-use egui_wgpu::wgpu;
+//use egui_wgpu::wgpu;
 
 use time2freq::{audio::AudioPlayer, gui::Gui, Viewport};
 

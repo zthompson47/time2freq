@@ -24,8 +24,10 @@ pub struct AudioPlayer {
     tx_play_song: channel::Sender<PathBuf>,
     lvl_cons: rtrb::Consumer<f32>,
     rms: [f32; 2],
+    #[allow(dead_code)]
     rms_buf: Option<ChannelBuf>,
     sample_rate: u32,
+    #[allow(dead_code)]
     channels: u32,
     ebur128: EbuR128,
 }
