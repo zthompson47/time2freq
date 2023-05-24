@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{gui::Gui, Uniform, wgpu};
-use noise::{Ease, PNoise1};
+use noize::{Ease, PNoise1};
 
 pub struct Viewport {
     size: PhysicalSize<u32>,
